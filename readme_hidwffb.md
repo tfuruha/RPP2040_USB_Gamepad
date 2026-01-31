@@ -65,8 +65,21 @@ build_flags =
 *   **Constant Force (Report ID: 0x01)**: `effectType` が `0x26` の場合に Constant Force として処理。
 *   **Constant Force Magnitude (Report ID: 0x05)**: 効果の強度設定。
 *   **Device Gain (Report ID: 0x0D)**: デバイス全体のゲイン設定。
+*   **Effect Operation (Report ID: 0x0A)**: エフェクトの開始・停止（Start / Solo / Stop）制御。
 
-## 5. デバッグログとPCアプリケーションとの連携
+## 5. テストツール (Tools)
+ 
+ 本プロジェクトには、動作検証用の Python アプリケーションが `tools/python/` に用意されています。
+ 
+ ### PID Tester (`pid_tester.pyw`)
+ *   **用途**: PCからFBBレポートを送信し、デバイス側のパース結果をシリアルログで確認します。
+ *   **主要機能**: Constant Force (ID:0x01, 0x05), Device Gain (ID:0x0D), Effect Operation (ID:0x0A) の送信テスト。
+ 
+ ### HID Tester (`hid_tester.pyw`)
+ *   **用途**: デバイスから送信されるHID入力レポート（ステアリング、アクセル等）のリアルタイム表示。
+ *   **機能**: シリアル経由でのループバックテスト機能も備えています。
+ 
+ ## 6. デバッグログとPCアプリケーションとの連携
 
 PC側（Python等）での自動照合を容易にするため、シリアルポートから特定のプリフィックスを持つログを出力できます。
 
@@ -87,6 +100,11 @@ PCアプリ側で `readline()` して正規表現などでパース可能な形�
 2.  **Device Gain 受信時**:
     *   `[PID_DEBUG] ID:0x0D, G:255`
     *   `G`: デバイスゲイン値（0 to 255）
+
+3.  **Effect Operation 受信時**:
+    *   `[PID_DEBUG] ID:0x0A, Index:1, Op:Start`
+    *   `Index`: エフェクトブロックインデックス（1 to 40）
+    *   `Op`: 操作内容（Start, Solo, Stop）
 
 ## 6. マルチコア構成時の注意点
 

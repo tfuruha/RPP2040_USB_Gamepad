@@ -53,6 +53,12 @@ static uint8_t const desc_hid_report[] = {
     0x95, 0x01, //   Report Count (1) - ID除くサイズ 1
     0x91, 0x02, //   Output (Data, Variable, Absolute)
 
+    // Effect Operation (ID: 10/0x0A)
+    0x85, 0x0A, //   Report ID (10)
+    0x09, 0x0A, //   Usage (0x0A)
+    0x95, 0x03, //   Report Count (3) - ID除くサイズ 3 (Index, Op, Loop)
+    0x91, 0x02, //   Output (Data, Variable, Absolute)
+
     // 汎用 FFB データ用 (ID: 2)
     0x06, 0x00, 0xFF, //   Usage Page (Vendor Defined 0xFF00)
     0x85, 0x02,       //   Report ID (2)

@@ -13,6 +13,34 @@
 // --- 定数定義 ---
 #define HID_FFB_REPORT_SIZE 64 ///< FFB受信用レポートのバッファサイズ
 
+// --- Report IDs (Host to Device) ---
+#define HID_ID_SET_EFFECT 0x01
+#define HID_ID_SET_ENVELOPE 0x02
+#define HID_ID_SET_CONDITION 0x03
+#define HID_ID_SET_PERIODIC 0x04
+#define HID_ID_SET_CONSTANT_FORCE 0x05
+#define HID_ID_SET_RAMP_FORCE 0x06
+#define HID_ID_SET_CUSTOM_FORCE 0x07
+// ...
+#define HID_ID_EFFECT_OPERATION 0x0A // エフェクトのStart/Stop
+#define HID_ID_DEVICE_CONTROL 0x0B   // 全停止/リセット
+#define HID_ID_DEVICE_GAIN 0x0D      // 全体ゲイン
+
+// --- Effect Types (ET) ---
+#define HID_ET_CONSTANT 0x26 // Constant Force
+#define HID_ET_RAMP 0x27
+#define HID_ET_SQUARE 0x30
+#define HID_ET_SINE 0x31
+#define HID_ET_SPRING 0x40 // Spring
+#define HID_ET_DAMPER 0x41 // Damper
+#define HID_ET_INERTIA 0x42
+#define HID_ET_FRICTION 0x43
+
+// --- Effect Operations ---
+#define HID_OP_START 0x01
+#define HID_OP_SOLO 0x02
+#define HID_OP_STOP 0x03
+
 /**
  * @brief カスタム HID レポート構造体 (16bit 軸 x 3, Button x 16)
  */
@@ -42,6 +70,16 @@ typedef struct {
 } TU_ATTR_PACKED USB_FFB_Report_SetEffect_t;
 
 /**
+ * @brief Set Effect Operation Output Report (ID: 0x0A)
+ */
+typedef struct {
+  uint8_t reportId;         ///< = 0x0A
+  uint8_t effectBlockIndex; ///< 1..40
+  uint8_t operation;        ///< 1: Start, 2: StartSolo, 3: Stop
+  uint8_t loopCount;        ///< 0..255
+} TU_ATTR_PACKED USB_FFB_Report_EffectOperation_t;
+
+/**
  * @brief Set Constant Force Output Report (ID: 0x05)
  */
 typedef struct {
@@ -66,6 +104,8 @@ typedef struct {
   bool isConstantForce;
   int16_t magnitude;
   uint8_t deviceGain;
+  uint8_t operation;        ///< Added for 0x0A
+  uint8_t effectBlockIndex; ///< Added for 0x0A
   bool updated;
 } pid_debug_info_t;
 

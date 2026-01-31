@@ -7,7 +7,6 @@
 #include <stddef.h>
 #include <string.h>
 
-
 // --- HID レポート記述子 (Raw binary形式) ---
 // 16bit軸 x 3 (Z, Rx, Ry), Button x 16, FFB Output Report x 64
 static uint8_t const desc_hid_report[] = {
@@ -171,6 +170,17 @@ void PID_ParseReport(uint8_t const *buffer, uint16_t bufsize) {
       USB_FFB_Report_SetConstantForce_t *report =
           (USB_FFB_Report_SetConstantForce_t *)buffer;
       _pid_debug.magnitude = report->magnitude;
+      _pid_debug.updated = true;
+    }
+    break;
+  }
+
+  case 0x0A: { // Set Effect Operation Report
+    if (bufsize >= sizeof(USB_FFB_Report_EffectOperation_t)) {
+      USB_FFB_Report_EffectOperation_t *report =
+          (USB_FFB_Report_EffectOperation_t *)buffer;
+      _pid_debug.operation = report->operation;
+      _pid_debug.effectBlockIndex = report->effectBlockIndex;
       _pid_debug.updated = true;
     }
     break;

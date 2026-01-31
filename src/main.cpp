@@ -20,7 +20,9 @@
 #define PIN_SPI_CS 17     // SPI CS (操舵軸センサ用)
 
 // --- デバッグ設定 ---
-#define PID_DEBUG_ENABLE ///< PIDプロトコルのパース結果をシリアル出力する
+// 原則、platformio.iniで定義する
+// #define PID_DEBUG_ENABLE ///< PIDプロトコルのパース結果をシリアル出力する
+// #define HID_INPUT_DEBUG_ENABLE ///< HID入力データをシリアル出力する
 
 // --- 周期管理用変数 ---
 uint32_t last_loop_ms = 0;           ///< Core0 メインループの最終実行時刻
@@ -129,6 +131,19 @@ void loop() {
       } else if (pid_info.lastReportId == 0x0D) {
         Serial.print("[PID_DEBUG] ID:0x0D, G:");
         Serial.println(pid_info.deviceGain);
+      } else if (pid_info.lastReportId == 0x0A) {
+        Serial.print("[PID_DEBUG] ID:0x0A, Index:");
+        Serial.print(pid_info.effectBlockIndex);
+        Serial.print(", Op:");
+        if (pid_info.operation == 1)
+          Serial.print("Start");
+        else if (pid_info.operation == 2)
+          Serial.print("Solo");
+        else if (pid_info.operation == 3)
+          Serial.print("Stop");
+        else
+          Serial.print(pid_info.operation);
+        Serial.println();
       }
     }
 #endif

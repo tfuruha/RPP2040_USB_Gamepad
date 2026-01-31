@@ -66,6 +66,9 @@ class PIDTesterApp(ctk.CTk):
         # PID Test: Device Gain (0x0D)
         self.setup_device_gain_ui()
 
+        # PID Test: Effect Operation (0x0A)
+        self.setup_effect_operation_ui()
+
     def setup_conn_ui(self):
         frame = self.create_section_frame("Connection")
         
@@ -146,6 +149,31 @@ class PIDTesterApp(ctk.CTk):
 
         self.send_gain_btn = ctk.CTkButton(frame, text="Send Report 0x0D", command=self.send_report_0D)
         self.send_gain_btn.pack(fill="x", padx=5, pady=10)
+
+    def setup_effect_operation_ui(self):
+        frame = self.create_section_frame("Effect Operation (ID: 0x0A)")
+        
+        ctk.CTkLabel(frame, text="Operation (1:Start, 2:Solo, 3:Stop):").pack(anchor="w", padx=5)
+        
+        op_frame = ctk.CTkFrame(frame, fg_color="transparent")
+        op_frame.pack(fill="x", padx=5, pady=2)
+        
+        self.eff_op = ctk.CTkSlider(op_frame, from_=1, to=3, number_of_steps=2,
+                                     command=lambda v: self.eff_op_val.configure(text=self.get_op_text(int(v))))
+        self.eff_op.set(1)
+        self.eff_op.pack(side="left", fill="x", expand=True)
+        
+        self.eff_op_val = ctk.CTkLabel(op_frame, text="Start", width=60)
+        self.eff_op_val.pack(side="right", padx=5)
+
+        self.send_op_btn = ctk.CTkButton(frame, text="Send Report 0x0A", command=self.send_report_0A)
+        self.send_op_btn.pack(fill="x", padx=5, pady=10)
+
+    def get_op_text(self, op):
+        if op == 1: return "Start"
+        if op == 2: return "Solo"
+        if op == 3: return "Stop"
+        return str(op)
 
     def create_section_frame(self, title):
         frame = ctk.CTkFrame(self.ctrl_frame)
@@ -289,6 +317,21 @@ class PIDTesterApp(ctk.CTk):
             self.add_log(f"Sent Report 0x0D: Gain={gain}")
         except Exception as e:
             self.add_log(f"Send Error (0D): {str(e)}")
+
+    def send_report_0A(self):
+        if not self.hid_device:
+            self.add_log("Error: HID Device not connected")
+            return
+        
+        try:
+            op = int(self.eff_op.get())
+            # Report ID 0x0A: Effect Operation (4 bytes total incl. ID)
+            # data: [ID, BlockIdx, Operation, LoopCount]
+            data = struct.pack("<BBBB", 0x0A, 1, op, 0xFF)
+            self.hid_device.write(data)
+            self.add_log(f"Sent Report 0x0A: Op={self.get_op_text(op)}, Loop=255")
+        except Exception as e:
+            self.add_log(f"Send Error (0A): {str(e)}")
 
     def add_log(self, text):
         self.log_box.configure(state="normal")

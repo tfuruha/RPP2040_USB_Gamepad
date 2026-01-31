@@ -51,11 +51,25 @@ build_flags =
     *   パースされたPIDプロトコルの要約データを取得します。
     *   デバッグ出力用として `main.cpp` 等で利用されます。
 
-### PIDパース関数
-
-*   `void PID_ParseReport(uint8_t const *buffer, uint16_t bufsize)`
     *   生データを受け取って内部構造体を更新する純粋なパース関数です。
     *   特定のUSBスタックに依存せず、`stdint.h` の型のみを使用しています。
+
+### ユーティリティ (util.h)
+
+精密な制御周期を維持するための非ブロッキングタイマー関数を提供します。
+
+*   `bool checkInterval_m(uint32_t &last_ms, uint32_t interval_ms)`
+    *   ミリ秒単位の周期判定。
+*   `bool checkInterval_u(uint32_t &last_us, uint32_t interval_us)`
+    *   マイクロ秒単位の周期判定。
+
+**使用例:**
+```cpp
+static uint32_t last_ms = 0;
+if (checkInterval_m(last_ms, 1)) { // 1000Hz周期
+    // 定期実行タスク
+}
+```
 
 ## 4. PID プロトコルのサポート
 
@@ -106,7 +120,22 @@ PCアプリ側で `readline()` して正規表現などでパース可能な形�
     *   `Index`: エフェクトブロックインデックス（1 to 40）
     *   `Op`: 操作内容（Start, Solo, Stop）
 
-## 6. マルチコア構成時の注意点
+## 7. HID 入力デバッグ機能 (シリアルコマンド)
+
+`HID_INPUT_DEBUG_ENABLE` が有効な場合、シリアルモニタからダミーの入力を流し込むことができます。
+
+### コマンド形式
+`HID:S<Steer>,A<Accel>,B<Brake>,BTN<Buttons>`
+
+*   `S`: ステアリング (-32767 to 32767)
+*   `A`: アクセル (-32767 to 32767)
+*   `B`: ブレーキ (-32767 to 32767)
+*   `BTN`: ボタンビットマスク (0 to 65535)
+
+**例:** `HID:S10000,A-32767,B-32767,BTN1`
+このコマンドを受信すると、5秒間物理入力を無視し、指定されたダミーデータをHIDレポートとして送信します。
+
+## 8. マルチコア構成時の注意点
 
 RP2040 でマルチコア（Core0/Core1）を利用する場合、以下の点に注意してください。
 
@@ -119,7 +148,7 @@ Adafruit TinyUSB の制約上、**USB 通信および `hidwffb` の API（特に
 > [!WARNING]
 > 現状の `hidwffb_get_ffb_data()` は内部で `memcpy` を行っていますが、モジュール内に同期機構は持っていません。Core0 の割り込み（USB受信）と Core1 からの読み出しが衝突する可能性があるため、上位層でセマフォ等のロックをかけることを検討してください。
 
-## 7. 実装例
+## 9. 実装例
 
 ```cpp
 #include "hidwffb.h"

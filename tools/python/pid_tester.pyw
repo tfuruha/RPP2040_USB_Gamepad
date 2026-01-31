@@ -153,18 +153,21 @@ class PIDTesterApp(ctk.CTk):
     def setup_effect_operation_ui(self):
         frame = self.create_section_frame("Effect Operation (ID: 0x0A)")
         
-        ctk.CTkLabel(frame, text="Operation (1:Start, 2:Solo, 3:Stop):").pack(anchor="w", padx=5)
+        ctk.CTkLabel(frame, text="Operation Select:").pack(anchor="w", padx=5)
         
-        op_frame = ctk.CTkFrame(frame, fg_color="transparent")
-        op_frame.pack(fill="x", padx=5, pady=2)
+        self.eff_op_var = tk.IntVar(value=1)
         
-        self.eff_op = ctk.CTkSlider(op_frame, from_=1, to=3, number_of_steps=2,
-                                     command=lambda v: self.eff_op_val.configure(text=self.get_op_text(int(v))))
-        self.eff_op.set(1)
-        self.eff_op.pack(side="left", fill="x", expand=True)
+        radio_frame = ctk.CTkFrame(frame, fg_color="transparent")
+        radio_frame.pack(fill="x", padx=5, pady=5)
         
-        self.eff_op_val = ctk.CTkLabel(op_frame, text="Start", width=60)
-        self.eff_op_val.pack(side="right", padx=5)
+        self.radio_start = ctk.CTkRadioButton(radio_frame, text="Start", variable=self.eff_op_var, value=1)
+        self.radio_start.pack(side="left", padx=5)
+        
+        self.radio_solo = ctk.CTkRadioButton(radio_frame, text="Solo", variable=self.eff_op_var, value=2)
+        self.radio_solo.pack(side="left", padx=5)
+        
+        self.radio_stop = ctk.CTkRadioButton(radio_frame, text="Stop", variable=self.eff_op_var, value=3)
+        self.radio_stop.pack(side="left", padx=5)
 
         self.send_op_btn = ctk.CTkButton(frame, text="Send Report 0x0A", command=self.send_report_0A)
         self.send_op_btn.pack(fill="x", padx=5, pady=10)
@@ -324,7 +327,7 @@ class PIDTesterApp(ctk.CTk):
             return
         
         try:
-            op = int(self.eff_op.get())
+            op = self.eff_op_var.get()
             # Report ID 0x0A: Effect Operation (4 bytes total incl. ID)
             # data: [ID, BlockIdx, Operation, LoopCount]
             data = struct.pack("<BBBB", 0x0A, 1, op, 0xFF)

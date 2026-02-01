@@ -21,12 +21,16 @@
 
 // --- デバッグ設定 ---
 // 原則、platformio.iniで定義する
-// #define PID_DEBUG_ENABLE ///< PIDプロトコルのパース結果をシリアル出力する
 // #define HID_INPUT_DEBUG_ENABLE ///< HID入力データをシリアル出力する
 
 // --- 周期管理用変数 ---
-uint32_t last_loop_ms = 0;           ///< Core0 メインループの最終実行時刻
-const uint32_t LOOP_INTERVAL_MS = 1; ///< 1000Hz周期
+uint32_t last_loop_ms = 0;              ///< Core0 メインループの最終実行時刻
+const uint32_t LOOP_INTERVAL_MS = 1;    ///< 1000Hz周期
+const uint32_t LOOP_INTERVAL_LOOP1 = 1; ///< 1000Hz周期
+
+// --- テスト用タイマー管理 ---
+uint32_t cool_back_test_until = 0; ///< テストモード終了時刻
+bool is_cool_back_active = false;  ///< テストモード活動中フラグ
 
 // --- FFBデータ共有用 (Core0 <-> Core1) ---
 uint8_t current_ffb_buf[HID_FFB_REPORT_SIZE];
@@ -50,6 +54,9 @@ void setup() {
 
   // USB接続待ち
   hidwffb_wait_for_mount();
+
+  // 共有メモリ初期化
+  ffb_shared_memory_init();
 
   Serial.println("System Refactored: HID Gamepad Ready (Core0)");
   last_loop_ms = millis();
@@ -86,38 +93,32 @@ void loop() {
         hidwffb_send_report(&dummy_report);
       } else {
 #endif
-        // --- 物理入力読み取り ---
-        int16_t steer = 0; // SPIセンサ読み取り値 (将来実装)
-        int32_t raw_accel = analogRead(PIN_ACCEL);
-        int32_t raw_brake = analogRead(PIN_BRAKE);
-
-        custom_gamepad_report_t report;
-        report.steer = steer;
-        report.accel = (int16_t)((raw_accel * 64) - 32768);
-        report.brake = (int16_t)((raw_brake * 64) - 32768);
-        report.buttons = 0;
-
-        if (!digitalRead(PIN_SHIFT_UP))
-          report.buttons |= (1 << 0);
-        if (!digitalRead(PIN_SHIFT_DOWN))
-          report.buttons |= (1 << 1);
-
-        // --- レポート送信 ---
-        hidwffb_send_report(&report);
+        // --- 物理入力読み取り (Core0内での処理は無効化に近い状態にする) ---
+        // テスト時は Core1 のループバック値が共有メモリ経由で届く。
+        // 物理入力を反映させたい場合は、ここで共有メモリを介して Core1
+        // に渡すか、 あるいは Core1 側で物理入力を読み込む設計にする。
+        // 今回はシンプルに、Core1が生成した値をCore0が送信する。
 #ifdef HID_INPUT_DEBUG_ENABLE
       }
 #endif
     }
 
-    // --- FFBデータ更新チェック ---
+    // --- FFBデータ更新チェックおよび共有 ---
     if (hidwffb_get_ffb_data(current_ffb_buf)) {
-      // 受信データを Core1 が参照可能な共有バッファ等へ反映
+      // 受信データを検知したらタイマーを5秒にセット
+      cool_back_test_until = millis() + 5000;
+      is_cool_back_active = true;
     }
 
-    // --- PIDデバッグ出力 ---
-#ifdef PID_DEBUG_ENABLE
+    // タイマー監視
+    if (is_cool_back_active && millis() > cool_back_test_until) {
+      is_cool_back_active = false;
+    }
+
+    // --- PID解析結果の共有 ---
     pid_debug_info_t pid_info;
     if (hidwffb_get_pid_debug_info(&pid_info)) {
+#ifdef PID_DEBUG_ENABLE
       if (pid_info.lastReportId == 0x01) {
         Serial.print("[PID_DEBUG] ID:0x01, Type:");
         Serial.print(pid_info.isConstantForce ? "Constant" : "Unknown");
@@ -128,34 +129,57 @@ void loop() {
       } else if (pid_info.lastReportId == 0x05) {
         Serial.print("[PID_DEBUG] ID:0x05, Mag:");
         Serial.println(pid_info.magnitude);
-      } else if (pid_info.lastReportId == 0x0D) {
-        Serial.print("[PID_DEBUG] ID:0x0D, G:");
-        Serial.println(pid_info.deviceGain);
       } else if (pid_info.lastReportId == 0x0A) {
-        Serial.print("[PID_DEBUG] ID:0x0A, Index:");
-        Serial.print(pid_info.effectBlockIndex);
-        Serial.print(", Op:");
-        if (pid_info.operation == 1)
-          Serial.print("Start");
-        else if (pid_info.operation == 2)
-          Serial.print("Solo");
-        else if (pid_info.operation == 3)
-          Serial.print("Stop");
-        else
-          Serial.print(pid_info.operation);
-        Serial.println();
+        Serial.print("[PID_DEBUG] ID:0x0A, Op:");
+        Serial.println(pid_info.operation);
+      } else if (pid_info.lastReportId == 0x0D) {
+        Serial.print("[PID_DEBUG] ID:0x0D, DeviceGain:");
+        Serial.println(pid_info.deviceGain);
       }
-    }
 #endif
+      pid_info.updated = is_cool_back_active; // 共有メモリへ渡すフラグ
+      ffb_core0_update_shared(&pid_info);
+    } else {
+      // PID受信がなくても定期的に共有メモリを更新（タイマー切れ反映のため）
+      pid_debug_info_t empty_info = {0};
+      empty_info.updated = is_cool_back_active;
+      ffb_core0_update_shared(&empty_info);
+    }
+
+    // --- 共有メモリから入力を取得してHID送信 ---
+    if (hidwffb_ready()) {
+      custom_gamepad_report_t shared_report = {0, 0, 0, 0};
+      ffb_core0_get_input_report(&shared_report);
+      hidwffb_send_report(&shared_report);
+    }
   }
 }
 
 // --- Core1: FFB演算およびモータ制御用 ---
+FFB_Shared_State_t core1_effects[MAX_EFFECTS];
+uint32_t last_loop1_ms = 0;
+
 void setup1() {
-  // Core1 初期化処理 (将来実装)
+  // Core1 初期化処理
+  for (int i = 0; i < MAX_EFFECTS; i++) {
+    core1_effects[i].active = false;
+    core1_effects[i].magnitude = 0;
+  }
+  last_loop1_ms = millis();
 }
 
 void loop1() {
-  // Core1 メインループ (将来実装)
-  // 角度センサの読み取りやFFB計算、PWM出力などを行う
+  // Core1 メインループ (1000Hz周期)
+  if (checkInterval_m(last_loop1_ms, LOOP_INTERVAL_LOOP1)) {
+    custom_gamepad_report_t core1_input = {0, 0, 0, 0};
+
+    // 物理入力読み取り (将来実装。現在は0またはループバック値)
+    // hidwffb_loopback_test_sync 内で CALLBACK_TEST_ENABLE 時は steer
+    // が上書きされる
+
+    // 同期処理
+    hidwffb_loopback_test_sync(&core1_input, core1_effects);
+
+    // モータ出力演算など (将来実装)
+  }
 }

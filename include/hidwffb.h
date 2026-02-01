@@ -12,7 +12,6 @@
 #include <stdbool.h>
 #include <stdint.h>
 
-
 // --- 定数定義 ---
 #define HID_FFB_REPORT_SIZE 64 ///< FFB受信用レポートのバッファサイズ
 #define MAX_EFFECTS 10         // 必要に応じて調整
@@ -118,8 +117,10 @@ typedef struct {
 // Core 0 -> Core 1 (FFB命令)
 typedef struct {
   int16_t magnitude;
+  int16_t gain; ///< 0x01 で設定される Gain
   uint8_t type;
   volatile bool active;
+  volatile bool isCoolBackTest; ///< 5秒間のテストモードフラグ
 } FFB_Shared_State_t;
 
 // --- 公開関数 ---
@@ -136,4 +137,10 @@ void PID_ParseReport(uint8_t const *buffer, uint16_t bufsize);
 bool hidwffb_get_pid_debug_info(pid_debug_info_t *info);
 
 void ffb_shared_memory_init(); // Core間通信用構造体の初期化
-#endif                         // HIDWFFB_H
+void ffb_core0_update_shared(pid_debug_info_t *info);
+void ffb_core0_get_input_report(custom_gamepad_report_t *dest);
+void ffb_core1_update_shared(custom_gamepad_report_t *new_input,
+                             FFB_Shared_State_t *local_effects_dest);
+void hidwffb_loopback_test_sync(custom_gamepad_report_t *new_input,
+                                FFB_Shared_State_t *local_effects_dest);
+#endif // HIDWFFB_H

@@ -146,7 +146,19 @@ Adafruit TinyUSB の制約上、**USB 通信および `hidwffb` の API（特に
 もし FFB データの演算を Core1 で行い、入出力を Core0 で行う場合は、共有バッファへのアクセスに排他制御（Mutex や `critical_section`）を導入してください。
 
 > [!WARNING]
-> 現状の `hidwffb_get_ffb_data()` は内部で `memcpy` を行っていますが、モジュール内に同期機構は持っていません。Core0 の割り込み（USB受信）と Core1 からの読み出しが衝突する可能性があるため、上位層でセマフォ等のロックをかけることを検討してください。
+> 本モジュールは、Core 間の同期用に関数を提供していますが、呼び出し側の順序管理が重要です。
+
+### 8.1. 排他制御の仕組み
+共有メモリへのアクセスには `mutex_t` を使用しています。呼び出し側は以下の関数を使用して同期を行います。
+- `ffb_core0_update_shared()`: Core0 でパースした FFB 命令を共有メモリへ。
+- `ffb_core1_update_shared()`: Core1 の物理入力を共有メモリへ、FFB命令をローカルへ。
+- `ffb_core0_get_input_report()`: Core0 が共有メモリから最新の入力レポートを取得。
+
+### 8.2. ループバックテスト (CALLBACK_TEST_ENABLE)
+共有メモリを通じた導通を検証するためのテスト用フレームワークです。
+- **挙動**: PID レポート (0x01, 0x05, 0x0D等) を受信すると 5 秒間フラグが立ち、Magnitude 等の値をそのまま HID 入力軸に投影します。
+- **連動する軸**: Steer <- Magnitude (0x05), Accel <- Gain (0x01), Brake <- Device Gain (0x0D)。
+- **デバッグログ**: Core1 視点での導通を `[CORE1_DEBUG]` としてシリアル出力します。
 
 ## 9. 実装例
 

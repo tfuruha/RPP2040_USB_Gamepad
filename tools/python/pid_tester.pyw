@@ -29,6 +29,10 @@ class PIDTesterApp(ctk.CTk):
         self.log_thread = threading.Thread(target=self.serial_read_task, daemon=True)
         self.log_thread.start()
 
+        # HID入力読み取りスレッド開始
+        self.hid_read_thread = threading.Thread(target=self.hid_read_task, daemon=True)
+        self.hid_read_thread.start()
+
     def setup_ui(self):
         # グリッド構成
         self.grid_columnconfigure(0, weight=1)  # ログエリア
@@ -68,6 +72,9 @@ class PIDTesterApp(ctk.CTk):
 
         # PID Test: Effect Operation (0x0A)
         self.setup_effect_operation_ui()
+
+        # HID Input Monitor
+        self.setup_monitor_ui()
 
     def setup_conn_ui(self):
         frame = self.create_section_frame("Connection")
@@ -172,6 +179,39 @@ class PIDTesterApp(ctk.CTk):
         self.send_op_btn = ctk.CTkButton(frame, text="Send Report 0x0A", command=self.send_report_0A)
         self.send_op_btn.pack(fill="x", padx=5, pady=10)
 
+    def setup_monitor_ui(self):
+        frame = self.create_section_frame("HID Input Monitor (Loopback)")
+        
+        # Steer
+        label_frame = ctk.CTkFrame(frame, fg_color="transparent")
+        label_frame.pack(fill="x", padx=5)
+        ctk.CTkLabel(label_frame, text="Steer:").pack(side="left")
+        self.mon_steer = ctk.CTkLabel(label_frame, text="0", font=ctk.CTkFont(weight="bold"))
+        self.mon_steer.pack(side="right")
+        self.prog_steer = ctk.CTkProgressBar(frame)
+        self.prog_steer.set(0.5)
+        self.prog_steer.pack(fill="x", padx=5, pady=(0, 5))
+
+        # Accel
+        label_frame = ctk.CTkFrame(frame, fg_color="transparent")
+        label_frame.pack(fill="x", padx=5)
+        ctk.CTkLabel(label_frame, text="Accel:").pack(side="left")
+        self.mon_accel = ctk.CTkLabel(label_frame, text="0", font=ctk.CTkFont(weight="bold"))
+        self.mon_accel.pack(side="right")
+        self.prog_accel = ctk.CTkProgressBar(frame)
+        self.prog_accel.set(0.5)
+        self.prog_accel.pack(fill="x", padx=5, pady=(0, 5))
+
+        # Brake
+        label_frame = ctk.CTkFrame(frame, fg_color="transparent")
+        label_frame.pack(fill="x", padx=5)
+        ctk.CTkLabel(label_frame, text="Brake:").pack(side="left")
+        self.mon_brake = ctk.CTkLabel(label_frame, text="0", font=ctk.CTkFont(weight="bold"))
+        self.mon_brake.pack(side="right")
+        self.prog_brake = ctk.CTkProgressBar(frame)
+        self.prog_brake.set(0.5)
+        self.prog_brake.pack(fill="x", padx=5, pady=(0, 10))
+
     def get_op_text(self, op):
         if op == 1: return "Start"
         if op == 2: return "Solo"
@@ -237,6 +277,7 @@ class PIDTesterApp(ctk.CTk):
                 path = hid_str.split("(")[-1].strip(")")
                 self.hid_device = hid.device()
                 self.hid_device.open_path(path.encode())
+                self.hid_device.set_nonblocking(True)
                 self.add_log(f"Connected to HID: {hid_str}")
             
             self.conn_btn.configure(text="Disconnect", fg_color="red")
@@ -264,6 +305,38 @@ class PIDTesterApp(ctk.CTk):
                 except:
                     pass
             time.sleep(0.01)
+
+    def hid_read_task(self):
+        while self.running:
+            if self.hid_device:
+                try:
+                    # Input Report (ID=1) を読み取る
+                    # report = self.hid_device.read(64, timeout_ms=10)
+                    # hidapi の read() は ID を含まないデータを返す場合があるが、
+                    # Windows等では ID が先頭に付くことが多い。
+                    data = self.hid_device.read(64)
+                    if data:
+                        # HID report ID 1 の場合 (data[0] == 1 または dataがそのまま)
+                        # Windows等では ID が先頭に付くことが多い。
+                        if data[0] == 1 and len(data) >= 9:
+                            # [ID, S_L, S_H, A_L, A_H, B_L, B_H, BTN_L, BTN_H]
+                            steer, accel, brake, btns = struct.unpack("<hhhH", bytes(data[1:9]))
+                            self.after(0, self.update_monitor, steer, accel, brake, btns)
+                except Exception as e:
+                    # print(f"HID Read Error: {e}")
+                    pass
+            time.sleep(0.001) # 1000Hzに近い速度で回す
+
+    def update_monitor(self, steer, accel, brake, btns):
+        # Steer (-32767 to 32767) -> Progress 0 to 1
+        self.mon_steer.configure(text=str(steer))
+        self.prog_steer.set((steer + 32768) / 65535)
+        
+        self.mon_accel.configure(text=str(accel))
+        self.prog_accel.set((accel + 32768) / 65535)
+        
+        self.mon_brake.configure(text=str(brake))
+        self.prog_brake.set((brake + 32768) / 65535)
 
     def send_report_01(self):
         if not self.hid_device:

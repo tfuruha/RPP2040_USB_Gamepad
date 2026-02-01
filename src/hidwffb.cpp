@@ -165,7 +165,7 @@ void PID_ParseReport(uint8_t const *buffer, uint16_t bufsize) {
       uint8_t idx = report->effectBlockIndex - 1;
       if (idx < MAX_EFFECTS) {
         core0_ffb_effects[idx].type = report->effectType;
-        // 注意：0x01自体には強度は含まれず、初期設定のみ
+        core0_ffb_effects[idx].gain = report->gain; // Gainを記録
       }
       if (report->effectType == 0x26) {
         _pid_debug.isConstantForce = true;
@@ -252,6 +252,24 @@ mutex_t ffb_shared_mutex;
 // --- Core間通信用構造体の初期化 ---
 void ffb_shared_memory_init() { mutex_init(&ffb_shared_mutex); }
 
+// --- Core 0 側: パース結果を共有メモリへ反映 ---
+void ffb_core0_update_shared(pid_debug_info_t *info) {
+  if (mutex_enter_timeout_ms(&ffb_shared_mutex, 1)) {
+    for (int i = 0; i < MAX_EFFECTS; i++) {
+      shared_ffb_effects[i] = core0_ffb_effects[i];
+      // Core0 側でタイマー管理しているフラグを共有メモリに反映
+      if (info != NULL) {
+        shared_ffb_effects[i].isCoolBackTest =
+            info->updated; // 暫定：後ほど main.cpp で管理
+      }
+    }
+    shared_global_gain = core0_global_gain;
+    mutex_exit(&ffb_shared_mutex);
+  }
+}
+
+// --- Core 1 側:
+// 物理入力を書き込み、FFB命令を読み出す。テスト時はループバックを実施 ---
 // --- Core 1 側: 物理入力(エンコーダ/ペダル)を書き込み、FFB命令を読み出す ---
 void ffb_core1_update_shared(custom_gamepad_report_t *new_input,
                              FFB_Shared_State_t *local_effects_dest) {
@@ -263,6 +281,50 @@ void ffb_core1_update_shared(custom_gamepad_report_t *new_input,
     for (int i = 0; i < MAX_EFFECTS; i++) {
       local_effects_dest[i] = shared_ffb_effects[i];
     }
+    mutex_exit(&ffb_shared_mutex);
+  }
+}
+
+void hidwffb_loopback_test_sync(custom_gamepad_report_t *new_input,
+                                FFB_Shared_State_t *local_effects_dest) {
+  // 1. まず Core 0 から最新の命令を受け取る
+  ffb_core1_update_shared(new_input, local_effects_dest);
+
+#ifdef CALLBACK_TEST_ENABLE
+  // 2. 受け取った命令に基づいて入力を捏造する (ループバック)
+  // isCoolBackTest が true の間だけ多軸ループバックを実施
+  if (local_effects_dest[0].isCoolBackTest) {
+    new_input->steer = local_effects_dest[0].magnitude;
+    new_input->accel = local_effects_dest[0].gain;
+    new_input->brake = (int16_t)shared_global_gain; // uint8_t -> int16_t
+  } else {
+    // 通常時（またはテスト無効時）
+    if (local_effects_dest[0].active) {
+      new_input->steer = local_effects_dest[0].magnitude;
+    } else {
+      new_input->steer = 0;
+    }
+    new_input->accel = 0;
+    new_input->brake = 0;
+  }
+
+  // デバッグ用
+  static int16_t last_mag = 0;
+  static bool last_cool = false;
+  if (local_effects_dest[0].magnitude != last_mag ||
+      local_effects_dest[0].isCoolBackTest != last_cool) {
+    Serial.print("[CORE1_DEBUG] Mag:");
+    Serial.print(local_effects_dest[0].magnitude);
+    Serial.print(", CoolBack:");
+    Serial.println(local_effects_dest[0].isCoolBackTest);
+    last_mag = local_effects_dest[0].magnitude;
+    last_cool = local_effects_dest[0].isCoolBackTest;
+  }
+#endif
+
+  // 3. 捏造した(または実際の)入力を Core 0 へ戻す
+  if (mutex_enter_timeout_ms(&ffb_shared_mutex, 1)) {
+    shared_input_report = *new_input;
     mutex_exit(&ffb_shared_mutex);
   }
 }

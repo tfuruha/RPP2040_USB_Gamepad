@@ -218,3 +218,37 @@ bool hidwffb_get_pid_debug_info(pid_debug_info_t *info) {
   _pid_debug.updated = false;
   return true;
 }
+/*
+双方向アクセスロジック
+Core 0 と Core 1 がお互いのデータを「安全に、かつ迅速に」読み書きするための関数
+*/
+FFB_Shared_State_t shared_ffb_effects[MAX_EFFECTS];
+volatile uint8_t shared_global_gain = 255;
+custom_gamepad_report_t shared_input_report;
+mutex_t ffb_shared_mutex;
+
+// --- Core間通信用構造体の初期化 ---
+void ffb_shared_memory_init() { mutex_init(&ffb_shared_mutex); }
+
+// --- Core 1 側: 物理入力(エンコーダ/ペダル)を書き込み、FFB命令を読み出す ---
+void ffb_core1_update_shared(custom_gamepad_report_t *new_input,
+                             FFB_Shared_State_t *local_effects_dest) {
+  if (mutex_enter_timeout_ms(&ffb_shared_mutex, 1)) {
+    // 1. Core 1 の結果を Core 0 へ渡す (物理入力)
+    shared_input_report = *new_input;
+
+    // 2. Core 0 の命令を Core 1 へ持ってくる (FFB命令)
+    for (int i = 0; i < MAX_EFFECTS; i++) {
+      local_effects_dest[i] = shared_ffb_effects[i];
+    }
+    mutex_exit(&ffb_shared_mutex);
+  }
+}
+
+// --- Core 0 側: パース結果を書き込み、HID送信用の入力を読み出す ---
+void ffb_core0_get_input_report(custom_gamepad_report_t *dest) {
+  if (mutex_enter_timeout_ms(&ffb_shared_mutex, 1)) {
+    *dest = shared_input_report;
+    mutex_exit(&ffb_shared_mutex);
+  }
+}

@@ -6,12 +6,16 @@
 #ifndef HIDWFFB_H
 #define HIDWFFB_H
 
+#include "pico/mutex.h"
 #include <Adafruit_TinyUSB.h>
 #include <Arduino.h>
+#include <stdbool.h>
 #include <stdint.h>
+
 
 // --- 定数定義 ---
 #define HID_FFB_REPORT_SIZE 64 ///< FFB受信用レポートのバッファサイズ
+#define MAX_EFFECTS 10         // 必要に応じて調整
 
 // --- Report IDs (Host to Device) ---
 #define HID_ID_SET_EFFECT 0x01
@@ -43,16 +47,17 @@
 
 /**
  * @brief カスタム HID レポート構造体 (16bit 軸 x 3, Button x 16)
+ * Core 1 -> Core 0 (物理入力/レポート用)を兼ねる
  */
 typedef struct {
   int16_t steer;    ///< 操舵 (Z軸: 0x32) [-32767 to 32767]
   int16_t accel;    ///< アクセル (Rx軸: 0x33) [-32767 to 32767]
   int16_t brake;    ///< ブレーキ (Ry軸: 0x34) [-32767 to 32767]
   uint16_t buttons; ///< ボタン (16ビット分) [1:Pressed, 0:Released]
-} TU_ATTR_PACKED custom_gamepad_report_t;
+} custom_gamepad_report_t;
 
 // --- PID (Force Feedback) レポート構造体定義 ---
-
+// 扱うデータが密なため、__attribute__((packed)) を使用する
 /**
  * @brief Set Effect Output Report (ID: 0x01)
  */
@@ -67,7 +72,7 @@ typedef struct {
   uint8_t enableAxis; ///< bits: 0=X, 1=Y, 2=DirectionEnable
   uint16_t direction; ///< 0..32767 (0..359.99 deg)
   uint16_t startDelay;
-} TU_ATTR_PACKED USB_FFB_Report_SetEffect_t;
+} __attribute__((packed)) USB_FFB_Report_SetEffect_t;
 
 /**
  * @brief Set Effect Operation Output Report (ID: 0x0A)
@@ -77,7 +82,7 @@ typedef struct {
   uint8_t effectBlockIndex; ///< 1..40
   uint8_t operation;        ///< 1: Start, 2: StartSolo, 3: Stop
   uint8_t loopCount;        ///< 0..255
-} TU_ATTR_PACKED USB_FFB_Report_EffectOperation_t;
+} __attribute__((packed)) USB_FFB_Report_EffectOperation_t;
 
 /**
  * @brief Set Constant Force Output Report (ID: 0x05)
@@ -86,7 +91,7 @@ typedef struct {
   uint8_t reportId;         ///< = 0x05
   uint8_t effectBlockIndex; ///< 1..40
   int16_t magnitude;        ///< -32767..32767
-} TU_ATTR_PACKED USB_FFB_Report_SetConstantForce_t;
+} __attribute__((packed)) USB_FFB_Report_SetConstantForce_t;
 
 /**
  * @brief Device Gain Output Report (ID: 0x0D)
@@ -94,7 +99,7 @@ typedef struct {
 typedef struct {
   uint8_t reportId;   ///< = 0x0D
   uint8_t deviceGain; ///< 0..255
-} TU_ATTR_PACKED USB_FFB_Report_DeviceGain_t;
+} __attribute__((packed)) USB_FFB_Report_DeviceGain_t;
 
 /**
  * @brief パースされたPIDデータの要約（デバッグ出力用）
@@ -109,6 +114,14 @@ typedef struct {
   bool updated;
 } pid_debug_info_t;
 
+// Core間通信用構造体
+// Core 0 -> Core 1 (FFB命令)
+typedef struct {
+  int16_t magnitude;
+  uint8_t type;
+  volatile bool active;
+} FFB_Shared_State_t;
+
 // --- 公開関数 ---
 
 void hidwffb_begin(uint8_t poll_interval_ms = 1);
@@ -122,4 +135,5 @@ void hidwffb_clear_ffb_flag(void);
 void PID_ParseReport(uint8_t const *buffer, uint16_t bufsize);
 bool hidwffb_get_pid_debug_info(pid_debug_info_t *info);
 
-#endif // HIDWFFB_H
+void ffb_shared_memory_init(); // Core間通信用構造体の初期化
+#endif                         // HIDWFFB_H

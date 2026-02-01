@@ -78,6 +78,9 @@ static volatile bool _ffb_updated = false;
 
 // PIDパース状態保持用
 static pid_debug_info_t _pid_debug = {0, false, 0, 0, false};
+// Core 0 用のローカルデータ（パース結果の保持用）
+static FFB_Shared_State_t core0_ffb_effects[MAX_EFFECTS];
+static uint8_t core0_global_gain = 255;
 
 /**
  * @brief HID受信コールバック (内部用)
@@ -159,6 +162,11 @@ void PID_ParseReport(uint8_t const *buffer, uint16_t bufsize) {
     if (bufsize >= sizeof(USB_FFB_Report_SetEffect_t)) {
       USB_FFB_Report_SetEffect_t *report = (USB_FFB_Report_SetEffect_t *)buffer;
       // ET Constant Force (0x26) のチェック
+      uint8_t idx = report->effectBlockIndex - 1;
+      if (idx < MAX_EFFECTS) {
+        core0_ffb_effects[idx].type = report->effectType;
+        // 注意：0x01自体には強度は含まれず、初期設定のみ
+      }
       if (report->effectType == 0x26) {
         _pid_debug.isConstantForce = true;
         // SetEffect時のGainを暫定的なMagとして扱う（後のID:05で上書きされる可能性あり）
@@ -175,6 +183,12 @@ void PID_ParseReport(uint8_t const *buffer, uint16_t bufsize) {
     if (bufsize >= sizeof(USB_FFB_Report_SetConstantForce_t)) {
       USB_FFB_Report_SetConstantForce_t *report =
           (USB_FFB_Report_SetConstantForce_t *)buffer;
+      uint8_t idx = report->effectBlockIndex - 1;
+      if (idx < MAX_EFFECTS) {
+        // PCから届く -10000〜10000 の値を、内部用の -32767〜32767
+        // 等にスケーリング
+        core0_ffb_effects[idx].magnitude = report->magnitude;
+      }
       _pid_debug.magnitude = report->magnitude;
       _pid_debug.updated = true;
     }
@@ -185,6 +199,13 @@ void PID_ParseReport(uint8_t const *buffer, uint16_t bufsize) {
     if (bufsize >= sizeof(USB_FFB_Report_EffectOperation_t)) {
       USB_FFB_Report_EffectOperation_t *report =
           (USB_FFB_Report_EffectOperation_t *)buffer;
+      uint8_t idx = report->effectBlockIndex - 1;
+      if (idx < MAX_EFFECTS) {
+        if (report->operation == HID_OP_START)
+          core0_ffb_effects[idx].active = true;
+        if (report->operation == HID_OP_STOP)
+          core0_ffb_effects[idx].active = false;
+      }
       _pid_debug.operation = report->operation;
       _pid_debug.effectBlockIndex = report->effectBlockIndex;
       _pid_debug.updated = true;
@@ -196,6 +217,7 @@ void PID_ParseReport(uint8_t const *buffer, uint16_t bufsize) {
     if (bufsize >= sizeof(USB_FFB_Report_DeviceGain_t)) {
       USB_FFB_Report_DeviceGain_t *report =
           (USB_FFB_Report_DeviceGain_t *)buffer;
+      core0_global_gain = report->deviceGain;
       _pid_debug.deviceGain = report->deviceGain;
       _pid_debug.updated = true;
     }

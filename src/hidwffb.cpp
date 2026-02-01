@@ -218,7 +218,7 @@ void PID_ParseReport(uint8_t const *buffer, uint16_t bufsize) {
       USB_FFB_Report_DeviceGain_t *report =
           (USB_FFB_Report_DeviceGain_t *)buffer;
       core0_global_gain = report->deviceGain;
-      _pid_debug.deviceGain = report->deviceGain;
+      _pid_debug.deviceGain = core0_global_gain;
       _pid_debug.updated = true;
     }
     break;

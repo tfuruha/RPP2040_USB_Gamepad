@@ -23,14 +23,18 @@
 // 原則、platformio.iniで定義する
 // #define HID_INPUT_DEBUG_ENABLE ///< HID入力データをシリアル出力する
 
-// --- 周期管理用変数 ---
-uint32_t last_loop_ms = 0;              ///< Core0 メインループの最終実行時刻
+// --- 周期管理 ---
 const uint32_t LOOP_INTERVAL_MS = 1;    ///< 1000Hz周期
 const uint32_t LOOP_INTERVAL_LOOP1 = 1; ///< 1000Hz周期
 
-// --- テスト用タイマー管理 ---
-uint32_t cool_back_test_until = 0; ///< テストモード終了時刻
-bool is_cool_back_active = false;  ///< テストモード活動中フラグ
+IntervalTrigger_m loop_trigger(LOOP_INTERVAL_MS);     ///< Core0 1000Hz周期
+IntervalTrigger_m loop1_trigger(LOOP_INTERVAL_LOOP1); ///< Core1 1000Hz周期
+
+// --- タイマー管理 ---
+OneShotTrigger_m cool_back_test_timer(5000); ///< 5秒のワンショットタイマー
+#ifdef HID_INPUT_DEBUG_ENABLE
+OneShotTrigger_m dummy_override_timer(5000); ///< ダミーデータ用5秒タイマー
+#endif
 
 // --- FFBデータ共有用 (Core0 <-> Core1) ---
 uint8_t current_ffb_buf[HID_FFB_REPORT_SIZE];
@@ -59,16 +63,15 @@ void setup() {
   ffb_shared_memory_init();
 
   Serial.println("System Refactored: HID Gamepad Ready (Core0)");
-  last_loop_ms = millis();
+  loop_trigger.init();
 }
 
 void loop() {
-  // 1ms周期で実行 (util.h の checkInterval_m を使用)
-  if (checkInterval_m(last_loop_ms, LOOP_INTERVAL_MS)) {
+  // 1ms周期で実行 (util.h の IntervalTrigger_m を使用)
+  if (loop_trigger.hasExpired()) {
 
     if (hidwffb_ready()) {
 #ifdef HID_INPUT_DEBUG_ENABLE
-      static uint32_t dummy_override_until = 0;
       static custom_gamepad_report_t dummy_report = {0, 0, 0, 0};
 
       // シリアル受信処理
@@ -82,14 +85,17 @@ void loop() {
             dummy_report.accel = line.substring(a_idx + 2, b_idx).toInt();
             dummy_report.brake = line.substring(b_idx + 2, btn_idx).toInt();
             dummy_report.buttons = line.substring(btn_idx + 4).toInt();
-            dummy_override_until = millis() + 5000;
+            dummy_override_timer.start();
             Serial.println("[HID_DEBUG] Dummy Data Serial Received");
           }
         }
       }
 
-      if (millis() < dummy_override_until) {
+      if (dummy_override_timer.isRunning()) {
         // ダミーデータ送信
+        if (dummy_override_timer.hasExpired()) {
+          // タイマー満了してもisRunningがfalseになるだけだが明示的に扱う場合はここで処理
+        }
         hidwffb_send_report(&dummy_report);
       } else {
 #endif
@@ -106,12 +112,12 @@ void loop() {
     // --- FFBデータ更新チェックおよび共有 ---
     if (hidwffb_get_ffb_data(current_ffb_buf)) {
       // 受信データを検知したらタイマーを5秒にセット
-      cool_back_test_until = millis() + 5000;
-      is_cool_back_active = true;
+      cool_back_test_timer.start();
     }
 
-    // タイマー監視
-    if (is_cool_back_active && millis() > cool_back_test_until) {
+    // タイマー監視とフラグ更新
+    bool is_cool_back_active = cool_back_test_timer.isRunning();
+    if (is_cool_back_active && cool_back_test_timer.hasExpired()) {
       is_cool_back_active = false;
     }
 
@@ -157,7 +163,6 @@ void loop() {
 
 // --- Core1: FFB演算およびモータ制御用 ---
 FFB_Shared_State_t core1_effects[MAX_EFFECTS];
-uint32_t last_loop1_ms = 0;
 
 void setup1() {
   // Core1 初期化処理
@@ -165,12 +170,12 @@ void setup1() {
     core1_effects[i].active = false;
     core1_effects[i].magnitude = 0;
   }
-  last_loop1_ms = millis();
+  loop1_trigger.init();
 }
 
 void loop1() {
   // Core1 メインループ (1000Hz周期)
-  if (checkInterval_m(last_loop1_ms, LOOP_INTERVAL_LOOP1)) {
+  if (loop1_trigger.hasExpired()) {
     custom_gamepad_report_t core1_input = {0, 0, 0, 0};
 
     // 物理入力読み取り (将来実装。現在は0またはループバック値)
